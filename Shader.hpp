@@ -116,8 +116,8 @@ Shader::Shader(std::string filename)
     std::ifstream file(filename);
     if(!file.is_open())
     {
-        std::cout << "sh::Shader, " << id_ << ": could not open file [" << filename
-                                    << ']' << std::endl;
+        std::cout << "sh::Shader, " << id_ << ": could not open file = " << filename
+                                    << std::endl;
         return;
     }
 
@@ -173,8 +173,8 @@ GLint Shader::getUniformLocation(const std::string& uniformName)
     auto it = uniformLocations_.find(uniformName);
     if(it == uniformLocations_.end())
     {
-        std::cout << "sh::Shader, " << id_ << ": not active uniform ["
-                  << uniformName << ']' << std::endl;
+        std::cout << "sh::Shader, " << id_ << ": not active uniform = "
+                  << uniformName << std::endl;
         return {};
     }
 
@@ -236,7 +236,7 @@ void Shader::initialize(const std::string& source)
         if(error.isError_)
         {
             std::cout << "sh::Shader, " << id_ << ": " << it->type_->name_.c_str()
-                      << " shader compilation failed, error log:\n"
+                      << " shader compilation failed\n"
                       << error.errorMessage_ << std::endl;
 
             compilationError = true;
@@ -267,7 +267,7 @@ void Shader::initialize(const std::string& source)
     auto error = getError<true>(programId_, GL_LINK_STATUS);
     if(error.isError_)
     {
-        std::cout << "sh::Shader, " << id_ << ": program linking failed, error log:\n"
+        std::cout << "sh::Shader, " << id_ << ": program linking failed\n"
                   << error.errorMessage_ << std::endl;
 
         glDeleteProgram(programId_);
