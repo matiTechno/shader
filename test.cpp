@@ -20,7 +20,7 @@ static const std::string shader_source =
 R"(
 VERTEX
 
-#dfversion 330
+#version 330
 uniform mat4 MVP;
 layout (location = 0) in vec2 vPos;
 layout (location = 1) in vec3 vCol;
