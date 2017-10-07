@@ -1,3 +1,4 @@
 #!/bin/bash
 
-g++ -std=c++17 -O2 -g -Wall -pedantic -Wextra glad.c test.cpp -o test -lglfw -lGL -ldl
+g++ -std=c++17 -O2 -g -Wall -pedantic -Wextra glad.c test.cpp -o test -lglfw -lGL -ldl \
+-lstdc++fs

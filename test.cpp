@@ -16,30 +16,6 @@ static const struct
     {  0.6f, -0.4f, 0.f, 1.f, 0.f },
     {   0.f,  0.6f, 0.f, 0.f, 1.f }
 };
-static const std::string shader_source =
-R"(
-VERTEX
-
-#version 330
-uniform mat4 MVP;
-layout (location = 0) in vec2 vPos;
-layout (location = 1) in vec3 vCol;
-out vec3 color;
-void main()
-{
-    gl_Position = MVP * vec4(vPos, 0.0, 1.0);
-    color = vCol;
-}
-
-FRAGMENT
-
-#version 330
-in vec3 color;
-void main()
-{
-    gl_FragColor = vec4(color, 1.0);
-}
-)";
 
 static void error_callback(int error, const char* description)
 {
@@ -63,6 +39,8 @@ int main(void)
         exit(EXIT_FAILURE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     window = glfwCreateWindow(640, 480, "Simple example", NULL, NULL);
     if (!window)
     {
@@ -78,17 +56,13 @@ int main(void)
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    sh::Shader shader(shader_source, "my shader");
+    sh::Shader shader("shader.sh");
 
     if(!shader.isValid())
     {
         glfwTerminate();
         exit(EXIT_FAILURE);
     }
-    
-    shader.bind();
-
-    mvp_location = shader.getUniformLocation("MVP");
 
     glGenVertexArrays(1, &vao);
     glBindVertexArray(vao);
@@ -98,8 +72,19 @@ int main(void)
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE,
                           sizeof(float) * 5, (void*) (sizeof(float) * 2));
+
+    auto prevTime = glfwGetTime();
+
     while (!glfwWindowShouldClose(window))
     {
+        auto newTime = glfwGetTime();
+        auto frameTime = newTime - prevTime;
+        prevTime = newTime;
+
+        shader.hotReload(frameTime);
+        shader.bind();
+        mvp_location = shader.getUniformLocation("MVP");
+
         float ratio;
         int width, height;
         mat4x4 m, p, mvp;

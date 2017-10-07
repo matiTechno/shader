@@ -1,5 +1,4 @@
 // made by   m a t i T e c h n o
-// todo: inotify
 // in implementation file:
 //                        #define SHADER_IMPLEMENTATION
 //                        #include "glad.h"
@@ -15,23 +14,29 @@
 //                                              or
 //                                              COMPUTE
 //                                              ...
+// code is exception free
 
 #pragma once
 
 #include <map>
 #include <string>
+#include <experimental/filesystem>
 
 namespace sh
 {
 
+namespace fs = std::experimental::filesystem;
+
+// does bind in constructors and reload functions
 class Shader
 {
 public:
+    enum {FilePollDelay = 1};
     using GLint = int;
     using GLuint = unsigned int;
 
-    Shader(std::string filename);
-    Shader(const std::string& source, std::string id);
+    Shader(const std::string& filename);
+    Shader(const std::string& source, const std::string& id);
     ~Shader();
     Shader(const Shader&) = delete;
     Shader& operator=(const Shader&) = delete;
@@ -40,14 +45,24 @@ public:
 
     bool isValid() const {return programId_;}
     void bind();
-    GLint getUniformLocation(const std::string& uniformName);
+    GLint getUniformLocation(const std::string& uniformName) const;
+
+    // return true if changes in file were detected
+    // after successful reload:
+    //                         * shader must be rebound
+    //                         * all uniform locations are invalidated
+    bool reload();
+    bool hotReload(float frameTimeS);
 
 private:
     std::string id_;
     GLuint programId_ = 0;
     std::map<std::string, GLint> uniformLocations_;
+    bool isSourceFromFile_;
+    fs::file_time_type fileLastWriteTime_;
+    float accumulator_ = 0.f;
 
-    void initialize(const std::string& source);
+    void swapProgram(const std::string& source);
 };
 
 } // namespace sh
@@ -59,78 +74,60 @@ private:
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <optional>
 
 namespace sh
 {
 
-struct Error
-{
-    bool isError_;
-    std::string errorMessage_;
-};
-
-template<bool isProgram>
-Error getError(GLuint id, GLenum flag)
-{
-    GLint success;
-
-    if constexpr (isProgram)
-        glGetProgramiv(id, flag, &success);
-    else
-        glGetShaderiv(id, flag, &success);
-
-    if(success == GL_TRUE)
-        return {false, {}};
-
-    GLint length;
-    if constexpr (isProgram)
-        glGetProgramiv(id, GL_INFO_LOG_LENGTH, &length);
-    else
-        glGetShaderiv(id, GL_INFO_LOG_LENGTH, &length);
-
-    if(!length)
-        return {false, {}};
-
-    --length;
-    std::string log(length, '\0');
-
-    if constexpr (isProgram)
-        glGetProgramInfoLog(id, length, nullptr, log.data());
-    else
-        glGetShaderInfoLog(id, length, nullptr, log.data());
-
-    return {true, log};
-}
-
-GLuint createAndCompileShader(GLenum type, const std::string& source)
-{
-    auto id = glCreateShader(type);
-    auto* str = source.c_str();
-    glShaderSource(id, 1, &str, nullptr);
-    glCompileShader(id);
-    return id;
-}
-
-Shader::Shader(std::string filename)
+std::optional<std::string> loadSourceFromFile(const std::string& filename)
 {
     std::ifstream file(filename);
+
     if(!file.is_open())
     {
-        std::cout << "sh::Shader, " << id_ << ": could not open file = " << filename
-                                    << std::endl;
-        return;
+        std::cout << "sh::Shader, could not open file = " << filename << std::endl;
+        return {};
     }
 
     std::stringstream stringstream;
     stringstream << file.rdbuf();
-    id_ = std::move(filename);
-    initialize(stringstream.str());
+    return stringstream.str();
 }
 
-Shader::Shader(const std::string& source, std::string id):
-    id_(std::move(id))
+std::optional<fs::file_time_type> getFileLastWriteTime(const std::string& filename)
 {
-    initialize(source);
+    std::error_code ec;
+    auto time = fs::last_write_time(filename, ec);
+
+    if(ec)
+    {
+        std::cout << "sh::Shader, last_write_time() failed on file = "
+                  << filename << std::endl;
+
+        return {};
+    }
+
+    return time;
+}
+
+Shader::Shader(const std::string& filename):
+    id_(filename),
+    isSourceFromFile_(true)
+{
+    if(auto source = loadSourceFromFile(filename))
+    {
+        if(auto time = getFileLastWriteTime(filename))
+            fileLastWriteTime_ = *time;
+
+        swapProgram(*source);
+    }
+}
+
+Shader::Shader(const std::string& source, const std::string& id):
+    id_(id),
+    isSourceFromFile_(false)
+{
+    swapProgram(source);
 }
 
 Shader::~Shader()
@@ -142,7 +139,10 @@ Shader::~Shader()
 Shader::Shader(Shader&& rhs):
     id_(std::move(rhs.id_)),
     programId_(rhs.programId_),
-    uniformLocations_(std::move(rhs.uniformLocations_))
+    uniformLocations_(std::move(rhs.uniformLocations_)),
+    isSourceFromFile_(rhs.isSourceFromFile_),
+    fileLastWriteTime_(rhs.fileLastWriteTime_),
+    accumulator_(rhs.accumulator_)
 {
     rhs.programId_ = 0;
 }
@@ -157,6 +157,9 @@ Shader& Shader::operator=(Shader&& rhs)
     id_ = std::move(rhs.id_);
     programId_ = rhs.programId_;
     uniformLocations_ = std::move(rhs.uniformLocations_);
+    isSourceFromFile_ = rhs.isSourceFromFile_;
+    fileLastWriteTime_ = std::move(rhs.fileLastWriteTime_);
+    accumulator_ = rhs.accumulator_;
 
     rhs.programId_ = 0;
 
@@ -168,7 +171,7 @@ void Shader::bind()
     glUseProgram(programId_);
 }
 
-GLint Shader::getUniformLocation(const std::string& uniformName)
+GLint Shader::getUniformLocation(const std::string& uniformName) const
 {
     auto it = uniformLocations_.find(uniformName);
     if(it == uniformLocations_.end())
@@ -181,7 +184,85 @@ GLint Shader::getUniformLocation(const std::string& uniformName)
     return it->second;
 }
 
-void Shader::initialize(const std::string& source)
+bool Shader::reload()
+{
+    if(!isSourceFromFile_)
+    {
+        std::cout << "sh::Shader, " << id_ << ": reload() failed, shader was not "
+                     "constructed from file" << std::endl;
+
+        return false;
+    }
+    
+    auto time = getFileLastWriteTime(id_);
+    
+    if(!time || *time == fileLastWriteTime_)
+        return false;
+    
+    fileLastWriteTime_ = *time;
+
+    if(auto source = loadSourceFromFile(id_))
+        swapProgram(*source);
+    
+    return true;
+}
+
+bool Shader::hotReload(float frameTimeS)
+{
+    accumulator_ += frameTimeS;
+    if(accumulator_ < FilePollDelay)
+        return false;
+    
+    accumulator_ = 0.f;
+    return reload();
+}
+
+template<bool isProgram>
+std::optional<std::string> getError(GLuint id, GLenum flag)
+{
+    GLint success;
+
+    if constexpr (isProgram)
+        glGetProgramiv(id, flag, &success);
+    else
+        glGetShaderiv(id, flag, &success);
+
+    if(success == GL_TRUE)
+        return {};
+
+    GLint length;
+    if constexpr (isProgram)
+        glGetProgramiv(id, GL_INFO_LOG_LENGTH, &length);
+    else
+        glGetShaderiv(id, GL_INFO_LOG_LENGTH, &length);
+
+    if(!length)
+        return "";
+
+    --length;
+    std::string log(length, '\0');
+
+    if constexpr (isProgram)
+        glGetProgramInfoLog(id, length, nullptr, log.data());
+    else
+        glGetShaderInfoLog(id, length, nullptr, log.data());
+
+    return log;
+}
+
+// shader must be cleaned by caller with glDeleteShader()
+GLuint createAndCompileShader(GLenum type, const std::string& source)
+{
+    auto id = glCreateShader(type);
+    auto* str = source.c_str();
+    glShaderSource(id, 1, &str, nullptr);
+    glCompileShader(id);
+    return id;
+}
+
+// returns 0 on error
+// when return value != 0 program must be cleaned by caller with glDeleteProgram()
+GLuint createProgram(const std::string& source, const std::string& id)
 {
     struct ShaderType
     {
@@ -232,12 +313,11 @@ void Shader::initialize(const std::string& source)
                                                  source.substr(it->sourceStart_,
                                                                count)));
 
-        auto error = getError<false>(shaders.back(), GL_COMPILE_STATUS);
-        if(error.isError_)
+        if(auto error = getError<false>(shaders.back(), GL_COMPILE_STATUS))
         {
-            std::cout << "sh::Shader, " << id_ << ": " << it->type_->name_.c_str()
+            std::cout << "sh::Shader, " << id << ": " << it->type_->name_.c_str()
                       << " shader compilation failed\n"
-                      << error.errorMessage_ << std::endl;
+                      << *error << std::endl;
 
             compilationError = true;
         }
@@ -248,32 +328,45 @@ void Shader::initialize(const std::string& source)
         for(auto shader: shaders)
             glDeleteShader(shader);
 
-        return;
+        return 0;
     }
 
-    programId_ = glCreateProgram();
+    auto program = glCreateProgram();
 
     for(auto shader: shaders)
-        glAttachShader(programId_, shader);
+        glAttachShader(program, shader);
 
-    glLinkProgram(programId_);
+    glLinkProgram(program);
 
     for(auto shader: shaders)
     {
-        glDetachShader(programId_, shader);
+        glDetachShader(program, shader);
         glDeleteShader(shader);
     }
 
-    auto error = getError<true>(programId_, GL_LINK_STATUS);
-    if(error.isError_)
+    if(auto error = getError<true>(program, GL_LINK_STATUS))
     {
-        std::cout << "sh::Shader, " << id_ << ": program linking failed\n"
-                  << error.errorMessage_ << std::endl;
+        std::cout << "sh::Shader, " << id << ": program linking failed\n"
+                  << *error << std::endl;
 
-        glDeleteProgram(programId_);
-        programId_ = 0;
-        return;
+        glDeleteProgram(program);
+        return 0;
     }
+
+    return program;
+}
+
+void Shader::swapProgram(const std::string& source)
+{
+    auto newProgramId  = createProgram(source, id_);
+    
+    if(!newProgramId)
+        return;
+
+    this->~Shader();
+    uniformLocations_.clear();
+
+    programId_ = newProgramId;
 
     GLint numUniforms;
     glGetProgramiv(programId_, GL_ACTIVE_UNIFORMS, &numUniforms);
@@ -291,6 +384,8 @@ void Shader::initialize(const std::string& source)
         auto uniformLocation = glGetUniformLocation(programId_, uniformName.data());
         uniformLocations_[uniformName.data()] = uniformLocation;
     }
+
+    bind();
 }
 
 } // namespace sh
