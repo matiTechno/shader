@@ -56,7 +56,7 @@ int main(void)
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    sh::Shader shader("shader.sh");
+    sh::Shader shader("my_shader.sh");
 
     if(!shader.isValid())
     {

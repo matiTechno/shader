@@ -1,7 +1,7 @@
 // made by   m a t i T e c h n o
 // in implementation file:
 //                        #define SHADER_IMPLEMENTATION
-//                        #include "glad.h"
+//                        #include "glad.h" or "glew.h" or ...
 //                        #include "Shader.h"
 
 // shader source format (order does not matter):
@@ -14,7 +14,13 @@
 //                                              or
 //                                              COMPUTE
 //                                              ...
+//                                              or
+//                                              INCLUDE "vertex.glsl"
+//                                              FRAGMENT
+//                                              ...
 // code is exception free
+// bug: reload() crash (i965_dri.so; glCompileShader)
+// warning: preprocessor parsing is naive
 
 #pragma once
 
@@ -27,7 +33,6 @@ namespace sh
 
 namespace fs = std::experimental::filesystem;
 
-// does bind in constructors and reload functions
 class Shader
 {
 public:
@@ -47,12 +52,14 @@ public:
     void bind();
     GLint getUniformLocation(const std::string& uniformName) const;
 
-    // return true if changes in file were detected
+
     // after successful reload:
     //                         * shader must be rebound
     //                         * all uniform locations are invalidated
-    bool reload();
-    bool hotReload(float frameTimeS);
+    // on failure:
+    //            * previous state remains
+    void reload();
+    void hotReload(float frameTimeS);
 
 private:
     std::string id_;
@@ -74,12 +81,11 @@ private:
 #include <iostream>
 #include <vector>
 #include <algorithm>
-#include <optional>
 
 namespace sh
 {
 
-std::optional<std::string> loadSourceFromFile(const std::string& filename)
+std::string loadSourceFromFile(const std::string& filename)
 {
     std::ifstream file(filename);
 
@@ -91,10 +97,30 @@ std::optional<std::string> loadSourceFromFile(const std::string& filename)
 
     std::stringstream stringstream;
     stringstream << file.rdbuf();
-    return stringstream.str();
+    auto source = stringstream.str();
+    
+    static const std::string includeDirective = "INCLUDE";
+
+    auto lineFirst = source.find(includeDirective);
+
+    if(lineFirst != std::string::npos)
+    {
+        auto lineLast = source.find('\n', lineFirst) + 1;
+
+        auto filenameFirst = source.find('"', lineFirst + includeDirective.size()) + 1;
+
+        auto filenameCount = source.find('"', filenameFirst) - filenameFirst;
+        
+        source.insert(lineLast,
+                      loadSourceFromFile(source.substr(filenameFirst, filenameCount)));
+
+        source.erase(lineFirst, lineLast - lineFirst);
+    }
+
+    return source;
 }
 
-std::optional<fs::file_time_type> getFileLastWriteTime(const std::string& filename)
+fs::file_time_type getFileLastWriteTime(const std::string& filename)
 {
     std::error_code ec;
     auto time = fs::last_write_time(filename, ec);
@@ -103,8 +129,6 @@ std::optional<fs::file_time_type> getFileLastWriteTime(const std::string& filena
     {
         std::cout << "sh::Shader, last_write_time() failed on file = "
                   << filename << std::endl;
-
-        return {};
     }
 
     return time;
@@ -114,13 +138,10 @@ Shader::Shader(const std::string& filename):
     id_(filename),
     isSourceFromFile_(true)
 {
-    if(auto source = loadSourceFromFile(filename))
-    {
-        if(auto time = getFileLastWriteTime(filename))
-            fileLastWriteTime_ = *time;
+    fileLastWriteTime_ = getFileLastWriteTime(filename);
 
-        swapProgram(*source);
-    }
+    if(auto source = loadSourceFromFile(filename); source.size())
+        swapProgram(source);
 }
 
 Shader::Shader(const std::string& source, const std::string& id):
@@ -184,37 +205,35 @@ GLint Shader::getUniformLocation(const std::string& uniformName) const
     return it->second;
 }
 
-bool Shader::reload()
+void Shader::reload()
 {
     if(!isSourceFromFile_)
     {
         std::cout << "sh::Shader, " << id_ << ": reload() failed, shader was not "
                      "constructed from file" << std::endl;
 
-        return false;
+        return;
     }
     
     auto time = getFileLastWriteTime(id_);
     
-    if(!time || *time == fileLastWriteTime_)
-        return false;
+    if(time == fs::file_time_type::min() || time == fileLastWriteTime_)
+        return;
     
-    fileLastWriteTime_ = *time;
+    fileLastWriteTime_ = std::move(time);
 
-    if(auto source = loadSourceFromFile(id_))
-        swapProgram(*source);
-    
-    return true;
+    if(auto source = loadSourceFromFile(id_); source.size())
+        swapProgram(source);
 }
 
-bool Shader::hotReload(float frameTimeS)
+void Shader::hotReload(float frameTimeS)
 {
     accumulator_ += frameTimeS;
-    if(accumulator_ < FilePollDelay)
-        return false;
-    
-    accumulator_ = 0.f;
-    return reload();
+    if(accumulator_ >= FilePollDelay)
+    {
+        accumulator_ = 0.f;
+        reload();
+    }
 }
 
 template<bool isProgram>
@@ -384,8 +403,6 @@ void Shader::swapProgram(const std::string& source)
         auto uniformLocation = glGetUniformLocation(programId_, uniformName.data());
         uniformLocations_[uniformName.data()] = uniformLocation;
     }
-
-    bind();
 }
 
 } // namespace sh
