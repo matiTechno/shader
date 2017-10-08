@@ -28,6 +28,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <string>
 #include <experimental/filesystem>
 
@@ -69,6 +70,7 @@ private:
     std::string id_;
     GLuint programId_ = 0;
     std::map<std::string, GLint> uniformLocations_;
+    mutable std::set<std::string> nonActiveUniforms_;
     bool isSourceFromFile_;
     fs::file_time_type fileLastWriteTime_;
     float accumulator_ = 0.f;
@@ -165,6 +167,7 @@ Shader::Shader(Shader&& rhs):
     id_(std::move(rhs.id_)),
     programId_(rhs.programId_),
     uniformLocations_(std::move(rhs.uniformLocations_)),
+    nonActiveUniforms_(std::move(rhs.nonActiveUniforms_)),
     isSourceFromFile_(rhs.isSourceFromFile_),
     fileLastWriteTime_(rhs.fileLastWriteTime_),
     accumulator_(rhs.accumulator_)
@@ -182,6 +185,7 @@ Shader& Shader::operator=(Shader&& rhs)
     id_ = std::move(rhs.id_);
     programId_ = rhs.programId_;
     uniformLocations_ = std::move(rhs.uniformLocations_);
+    nonActiveUniforms_ = std::move(rhs.nonActiveUniforms_);
     isSourceFromFile_ = rhs.isSourceFromFile_;
     fileLastWriteTime_ = std::move(rhs.fileLastWriteTime_);
     accumulator_ = rhs.accumulator_;
@@ -199,10 +203,15 @@ void Shader::bind()
 GLint Shader::getUniformLocation(const std::string& uniformName) const
 {
     auto it = uniformLocations_.find(uniformName);
-    if(it == uniformLocations_.end())
+
+    if(it == uniformLocations_.end() &&
+       nonActiveUniforms_.find(uniformName) == nonActiveUniforms_.end())
     {
-        std::cout << "sh::Shader, " << id_ << ": not active uniform = "
+        std::cout << "sh::Shader, " << id_ << ": nonactive uniform = "
                   << uniformName << std::endl;
+
+        nonActiveUniforms_.insert(uniformName);
+
         return {};
     }
 
