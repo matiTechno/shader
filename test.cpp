@@ -39,6 +39,7 @@ int main(void)
         exit(EXIT_FAILURE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     //glfwWindowHint(GLFW_TRANSPARENT, GLFW_TRUE);
+    //glfwWindowHint(GLFW_RESIZABLE, 0);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -57,7 +58,7 @@ int main(void)
     glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-    sh::Shader shader("my_shader.sh");
+    sh::Shader shader("my_shader.sh", true);
 
     if(!shader.isValid())
     {
@@ -81,8 +82,8 @@ int main(void)
         auto newTime = glfwGetTime();
         auto frameTime = newTime - prevTime;
         prevTime = newTime;
+        (void)frameTime;
 
-        shader.hotReload(frameTime);
         shader.bind();
         mvp_location = shader.getUniformLocation("MVP");
 

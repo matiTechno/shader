@@ -1,4 +1,5 @@
 // made by   m a t i T e c h n o
+// compiles with gcc 7.2.0
 // in the implementation file:
 
 // #define SHADER_IMPLEMENTATION
@@ -22,14 +23,13 @@
 // ...
 
 // code is exception free
-// bug: reload() crash (i965_dri.so; glCompileShader)
 // warning: preprocessor parsing is naive
 
 #pragma once
 
-#include <map>
-#include <set>
 #include <string>
+#include <set>
+#include <map>
 #include <experimental/filesystem>
 
 namespace sh
@@ -40,52 +40,71 @@ namespace fs = std::experimental::filesystem;
 class Shader
 {
 public:
-    enum {FilePollDelay = 1};
     using GLint = int;
     using GLuint = unsigned int;
 
-    Shader(const std::string& filename);
+    Shader(const std::string& filename, bool hotReload);
     Shader(const std::string& source, const std::string& id);
-    ~Shader();
-    Shader(const Shader&) = delete;
-    Shader& operator=(const Shader&) = delete;
-    Shader(Shader&& rhs);
-    Shader& operator=(Shader&& rhs);
 
-    bool isValid() const {return programId_;}
-    void bind();
+    bool isValid() const {return program_.getId();}
+
     GLint getUniformLocation(const std::string& uniformName) const;
 
-
     // after successful reload:
-    // * shader must be rebound
-    // * all uniform locations are invalidated
-    
+    //                         * shader must be rebound
+    //                         * all uniform locations are invalidated
     // on failure:
-    // * previous state remains
-    void reload();
-    void hotReload(float frameTimeS);
+    //                         * previous state remains
+    //
+    void reload(); // does not check if file was modified
+
+    void bind(); // if hotReload is on and file was modified does reload
 
 private:
-    std::string id_;
-    GLuint programId_ = 0;
-    std::map<std::string, GLint> uniformLocations_;
-    mutable std::set<std::string> nonactiveUniforms_;
-    bool isSourceFromFile_;
-    fs::file_time_type fileLastWriteTime_;
-    float accumulator_ = 0.f;
+    class Program
+    {
+    public:
+        Program(): id_(0) {}
+        Program(GLuint id): id_(id) {};
+        ~Program() {if(id_) glDeleteProgram(id_);}
+        Program(const Program&) = delete;
+        Program& operator=(const Program&) = delete;
+        Program(Program&& rhs): id_(rhs.id_) {rhs.id_ = 0;};
 
-    void swapProgram(const std::string& source);
+        Program& operator=(Program&& rhs)
+        {
+            if(this == &rhs)
+                return *this;
+            this->~Program();
+            id_ = rhs.id_;
+            rhs.id_ = 0;
+            return *this;
+        }
+
+        GLuint getId() const {return id_;}
+
+    private:
+        GLuint id_;
+    };
+
+    std::string id_;
+    bool hotReload_;
+    Program program_;
+    fs::file_time_type fileLastWriteTime_;
+    std::map<std::string, GLint> uniformLocations_;
+    mutable std::set<std::string> inactiveUniforms_;
+
+    // returns true on success
+    bool swapProgram(const std::string& source);
 };
 
 } // namespace sh
 
 #ifdef SHADER_IMPLEMENTATION
 
+#include <iostream>
 #include <fstream>
 #include <sstream>
-#include <iostream>
-#include <vector>
 #include <algorithm>
 
 namespace sh
@@ -97,7 +116,7 @@ std::string loadSourceFromFile(const std::string& filename)
 
     if(!file.is_open())
     {
-        std::cout << "sh::Shader, could not open file = " << filename << std::endl;
+        std::cout << "sh::Shader: could not open file = " << filename << std::endl;
         return {};
     }
 
@@ -133,16 +152,16 @@ fs::file_time_type getFileLastWriteTime(const std::string& filename)
 
     if(ec)
     {
-        std::cout << "sh::Shader, last_write_time() failed on file = "
+        std::cout << "sh::Shader: last_write_time() failed, file = "
                   << filename << std::endl;
     }
 
     return time;
 }
 
-Shader::Shader(const std::string& filename):
+Shader::Shader(const std::string& filename, bool hotReload):
     id_(filename),
-    isSourceFromFile_(true)
+    hotReload_(hotReload)
 {
     fileLastWriteTime_ = getFileLastWriteTime(filename);
 
@@ -152,52 +171,27 @@ Shader::Shader(const std::string& filename):
 
 Shader::Shader(const std::string& source, const std::string& id):
     id_(id),
-    isSourceFromFile_(false)
+    hotReload_(false)
 {
     swapProgram(source);
 }
 
-Shader::~Shader()
-{
-    if(programId_)
-        glDeleteProgram(programId_);
-}
-
-Shader::Shader(Shader&& rhs):
-    id_(std::move(rhs.id_)),
-    programId_(rhs.programId_),
-    uniformLocations_(std::move(rhs.uniformLocations_)),
-    nonactiveUniforms_(std::move(rhs.nonactiveUniforms_)),
-    isSourceFromFile_(rhs.isSourceFromFile_),
-    fileLastWriteTime_(rhs.fileLastWriteTime_),
-    accumulator_(rhs.accumulator_)
-{
-    rhs.programId_ = 0;
-}
-
-Shader& Shader::operator=(Shader&& rhs)
-{
-    if(this == &rhs)
-        return *this;
-
-    this->~Shader();
-
-    id_ = std::move(rhs.id_);
-    programId_ = rhs.programId_;
-    uniformLocations_ = std::move(rhs.uniformLocations_);
-    nonactiveUniforms_ = std::move(rhs.nonactiveUniforms_);
-    isSourceFromFile_ = rhs.isSourceFromFile_;
-    fileLastWriteTime_ = std::move(rhs.fileLastWriteTime_);
-    accumulator_ = rhs.accumulator_;
-
-    rhs.programId_ = 0;
-
-    return *this;
-}
-
 void Shader::bind()
 {
-    glUseProgram(programId_);
+    if(hotReload_)
+    {
+        if(auto time = getFileLastWriteTime(id_); time > fileLastWriteTime_)
+        {
+            fileLastWriteTime_ = time;
+            
+            if(auto source = loadSourceFromFile(id_); source.size())
+                if(swapProgram(source))
+                    std::cout << "sh::Shader, " << id_
+                              << ": hot reload succeeded" << std::endl;
+        }
+    }
+
+    glUseProgram(program_.getId());
 }
 
 GLint Shader::getUniformLocation(const std::string& uniformName) const
@@ -205,14 +199,14 @@ GLint Shader::getUniformLocation(const std::string& uniformName) const
     auto it = uniformLocations_.find(uniformName);
 
     if(it == uniformLocations_.end() &&
-       nonactiveUniforms_.find(uniformName) == nonactiveUniforms_.end())
+        inactiveUniforms_.find(uniformName) == inactiveUniforms_.end())
     {
-        std::cout << "sh::Shader, " << id_ << ": nonactive uniform = "
+        std::cout << "sh::Shader, " << id_ << ": inactive uniform = "
                   << uniformName << std::endl;
 
-        nonactiveUniforms_.insert(uniformName);
+        inactiveUniforms_.insert(uniformName);
 
-        return {};
+        return 666;
     }
 
     return it->second;
@@ -220,33 +214,12 @@ GLint Shader::getUniformLocation(const std::string& uniformName) const
 
 void Shader::reload()
 {
-    if(!isSourceFromFile_)
-    {
-        std::cout << "sh::Shader, " << id_ << ": reload() failed, shader was not "
-                     "constructed from file" << std::endl;
-
-        return;
-    }
-    
-    auto time = getFileLastWriteTime(id_);
-    
-    if(time == fs::file_time_type::min() || time == fileLastWriteTime_)
-        return;
-    
-    fileLastWriteTime_ = std::move(time);
+    if(auto time = getFileLastWriteTime(id_); time > fileLastWriteTime_)
+        fileLastWriteTime_ = time;
 
     if(auto source = loadSourceFromFile(id_); source.size())
-        swapProgram(source);
-}
-
-void Shader::hotReload(float frameTimeS)
-{
-    accumulator_ += frameTimeS;
-    if(accumulator_ >= FilePollDelay)
-    {
-        accumulator_ = 0.f;
-        reload();
-    }
+        if(swapProgram(source))
+            std::cout << "sh::Shader, " << id_ << ": reload succeeded" << std::endl;
 }
 
 template<bool isProgram>
@@ -302,16 +275,16 @@ GLuint createProgram(const std::string& source, const std::string& id)
         std::string name;
     };
 
+    static const ShaderType shaderTypes[] = {{GL_VERTEX_SHADER,   "VERTEX"},
+                                            {GL_GEOMETRY_SHADER, "GEOMETRY"},
+                                            {GL_FRAGMENT_SHADER, "FRAGMENT"},
+                                            {GL_COMPUTE_SHADER,  "COMPUTE"}};
+    
     struct ShaderData
     {
         std::size_t sourceStart;
         const ShaderType* type;
     };
-
-    static const ShaderType shaderTypes[] = {{GL_VERTEX_SHADER,   "VERTEX"},
-                                            {GL_GEOMETRY_SHADER, "GEOMETRY"},
-                                            {GL_FRAGMENT_SHADER, "FRAGMENT"},
-                                            {GL_COMPUTE_SHADER,  "COMPUTE"}};
 
     std::vector<ShaderData> shaderData;
 
@@ -388,21 +361,19 @@ GLuint createProgram(const std::string& source, const std::string& id)
     return program;
 }
 
-void Shader::swapProgram(const std::string& source)
+bool Shader::swapProgram(const std::string& source)
 {
-    auto newProgramId  = createProgram(source, id_);
+    auto newProgram = createProgram(source, id_);
+    if(!newProgram)
+        return false;
     
-    if(!newProgramId)
-        return;
-
-    this->~Shader();
+    program_ = Program(newProgram);
+    
     uniformLocations_.clear();
-    nonactiveUniforms_.clear();
-
-    programId_ = newProgramId;
+    inactiveUniforms_.clear();
 
     GLint numUniforms;
-    glGetProgramiv(programId_, GL_ACTIVE_UNIFORMS, &numUniforms);
+    glGetProgramiv(program_.getId(), GL_ACTIVE_UNIFORMS, &numUniforms);
 
     std::vector<char> uniformName(256);
 
@@ -411,12 +382,16 @@ void Shader::swapProgram(const std::string& source)
         GLint dum1;
         GLenum dum2;
 
-        glGetActiveUniform(programId_, i, uniformName.size(), nullptr, &dum1, &dum2,
-                           uniformName.data());
+        glGetActiveUniform(program_.getId(), i, uniformName.size(), nullptr,
+                           &dum1, &dum2, uniformName.data());
 
-        auto uniformLocation = glGetUniformLocation(programId_, uniformName.data());
+        auto uniformLocation = glGetUniformLocation(program_.getId(),
+                                                    uniformName.data());
+
         uniformLocations_[uniformName.data()] = uniformLocation;
     }
+
+    return true;
 }
 
 } // namespace sh
