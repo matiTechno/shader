@@ -43,7 +43,7 @@ public:
     using GLint = int;
     using GLuint = unsigned int;
 
-    Shader(const std::string& filename, bool hotReload);
+    Shader(const std::string& filename, bool hotReload = false);
     Shader(const std::string& source, const std::string& id);
 
     bool isValid() const {return program_.getId();}
