@@ -276,9 +276,9 @@ GLuint createProgram(const std::string& source, const std::string& id)
     };
 
     static const ShaderType shaderTypes[] = {{GL_VERTEX_SHADER,   "VERTEX"},
-                                            {GL_GEOMETRY_SHADER, "GEOMETRY"},
-                                            {GL_FRAGMENT_SHADER, "FRAGMENT"},
-                                            {GL_COMPUTE_SHADER,  "COMPUTE"}};
+                                             {GL_GEOMETRY_SHADER, "GEOMETRY"},
+                                             {GL_FRAGMENT_SHADER, "FRAGMENT"},
+                                             {GL_COMPUTE_SHADER,  "COMPUTE"}};
     
     struct ShaderData
     {
