@@ -1,23 +1,26 @@
 // made by   m a t i T e c h n o
-// in implementation file:
-//                        #define SHADER_IMPLEMENTATION
-//                        #include "glad.h" or "glew.h" or ...
-//                        #include "Shader.h"
+// in the implementation file:
+
+// #define SHADER_IMPLEMENTATION
+// #include "glad.h" or "glew.h" or ...
+// #include "Shader.h"
 
 // shader source format (order does not matter):
-//                                              VERTEX
-//                                              ...
-//                                              GEOMETRY (optional)
-//                                              ...
-//                                              FRAGMENT
-//                                              ...
-//                                              or
-//                                              COMPUTE
-//                                              ...
-//                                              or
-//                                              INCLUDE "vertex.glsl"
-//                                              FRAGMENT
-//                                              ...
+
+// VERTEX
+// ...
+// GEOMETRY (optional)
+// ...
+// FRAGMENT
+// ...
+// or
+// COMPUTE
+// ...
+// or
+// INCLUDE "vertex.glsl"
+// FRAGMENT
+// ...
+
 // code is exception free
 // bug: reload() crash (i965_dri.so; glCompileShader)
 // warning: preprocessor parsing is naive
@@ -54,10 +57,11 @@ public:
 
 
     // after successful reload:
-    //                         * shader must be rebound
-    //                         * all uniform locations are invalidated
+    // * shader must be rebound
+    // * all uniform locations are invalidated
+    
     // on failure:
-    //            * previous state remains
+    // * previous state remains
     void reload();
     void hotReload(float frameTimeS);
 
@@ -285,14 +289,14 @@ GLuint createProgram(const std::string& source, const std::string& id)
 {
     struct ShaderType
     {
-        GLenum value_;
-        std::string name_;
+        GLenum value;
+        std::string name;
     };
 
     struct ShaderData
     {
-        std::size_t sourceStart_;
-        const ShaderType* type_;
+        std::size_t sourceStart;
+        const ShaderType* type;
     };
 
     static const ShaderType shaderTypes[] = {{GL_VERTEX_SHADER,   "VERTEX"},
@@ -304,13 +308,13 @@ GLuint createProgram(const std::string& source, const std::string& id)
 
     for(auto& shaderType: shaderTypes)
     {
-        if(auto pos = source.find(shaderType.name_); pos != std::string::npos)
-            shaderData.push_back({pos + shaderType.name_.size(), &shaderType});
+        if(auto pos = source.find(shaderType.name); pos != std::string::npos)
+            shaderData.push_back({pos + shaderType.name.size(), &shaderType});
     }
 
     std::sort(shaderData.begin(), shaderData.end(),
               [](ShaderData& l, ShaderData& r)
-              {return l.sourceStart_ < r.sourceStart_;});
+              {return l.sourceStart < r.sourceStart;});
 
     std::vector<GLuint> shaders;
 
@@ -324,17 +328,17 @@ GLuint createProgram(const std::string& source, const std::string& id)
         else
         {
             auto nextIt = it + 1;
-            count = nextIt->sourceStart_ - nextIt->type_->name_.size()
-                    - it->sourceStart_;
+            count = nextIt->sourceStart - nextIt->type->name.size()
+                    - it->sourceStart;
         }
 
-        shaders.push_back(createAndCompileShader(it->type_->value_,
-                                                 source.substr(it->sourceStart_,
+        shaders.push_back(createAndCompileShader(it->type->value,
+                                                 source.substr(it->sourceStart,
                                                                count)));
 
         if(auto error = getError<false>(shaders.back(), GL_COMPILE_STATUS))
         {
-            std::cout << "sh::Shader, " << id << ": " << it->type_->name_.c_str()
+            std::cout << "sh::Shader, " << id << ": " << it->type->name.c_str()
                       << " shader compilation failed\n"
                       << *error << std::endl;
 
