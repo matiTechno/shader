@@ -65,11 +65,11 @@ private:
     {
     public:
         Program(): id_(0) {}
-        Program(GLuint id): id_(id) {};
+        Program(GLuint id): id_(id) {}
         ~Program();
         Program(const Program&) = delete;
         Program& operator=(const Program&) = delete;
-        Program(Program&& rhs): id_(rhs.id_) {rhs.id_ = 0;};
+        Program(Program&& rhs): id_(rhs.id_) {rhs.id_ = 0;}
 
         Program& operator=(Program&& rhs)
         {
