@@ -66,7 +66,7 @@ private:
     public:
         Program(): id_(0) {}
         Program(GLuint id): id_(id) {};
-        ~Program() {if(id_) glDeleteProgram(id_);}
+        ~Program();
         Program(const Program&) = delete;
         Program& operator=(const Program&) = delete;
         Program(Program&& rhs): id_(rhs.id_) {rhs.id_ = 0;};
@@ -109,6 +109,8 @@ private:
 
 namespace sh
 {
+    
+Shader::Program::~Program() {if(id_) glDeleteProgram(id_);}
 
 std::string loadSourceFromFile(const std::string& filename)
 {
