@@ -44,7 +44,7 @@ public:
     using GLuint = unsigned int;
 
     Shader(const std::string& filename, bool hotReload = false);
-    Shader(const std::string& source, const std::string& id);
+    Shader(const std::string& source, const char* id);
 
     bool isValid() const {return program_.getId();}
 
@@ -171,7 +171,7 @@ Shader::Shader(const std::string& filename, bool hotReload):
         swapProgram(source);
 }
 
-Shader::Shader(const std::string& source, const std::string& id):
+Shader::Shader(const std::string& source, const char* id):
     id_(id),
     hotReload_(false)
 {
